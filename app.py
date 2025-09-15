@@ -51,7 +51,7 @@ def cleanup_old_files():
         
         time.sleep(300) # Aspetta 5 minuti
 
-def run_conversion_task(job_id, m3u8_url):
+def run_conversion_task(job_id, m3u8_url, audio_delay_cs):
     ts_filename = f"{job_id}.ts"
     mp4_filename = f"{job_id}.mp4"
     ts_filepath = os.path.join(DOWNLOAD_FOLDER, ts_filename)
@@ -70,18 +70,29 @@ def run_conversion_task(job_id, m3u8_url):
         
         jobs[job_id]['status'] = 'converting'
         
-        # --- COMANDO FFMPEG MIGLIORATO ---
-        # Aggiunti -copyts e -start_at_zero per una migliore gestione dei timestamp
-        # e una sincronizzazione audio/video più precisa.
-        command = [
-            'ffmpeg', 
-            '-i', ts_filepath, 
-            '-c', 'copy',
-            '-copyts',
-            '-start_at_zero',
-            '-bsf:a', 'aac_adtstoasc', 
-            '-y', mp4_filepath
-        ]
+        # --- LOGICA FFMPEG CON CONTROLLO DEL RITARDO AUDIO ---
+        command = ['ffmpeg', '-i', ts_filepath]
+
+        # Se è specificato un ritardo, l'audio deve essere ricodificato.
+        if audio_delay_cs != 0:
+            delay_in_seconds = float(audio_delay_cs) / 100.0
+            print(f"[FFMPEG] Applicazione di un ritardo audio di {delay_in_seconds} secondi.")
+            # Copia il video, ma applica un filtro all'audio
+            command.extend([
+                '-c:v', 'copy',
+                '-af', f'asetpts=PTS+({delay_in_seconds})/TB' 
+            ])
+        else:
+            # Conversione lossless standard
+            command.extend([
+                '-c', 'copy',
+                '-copyts',
+                '-start_at_zero',
+                '-bsf:a', 'aac_adtstoasc'
+            ])
+        
+        command.extend(['-y', mp4_filepath])
+
         subprocess.run(command, check=True, capture_output=True, text=True, timeout=600)
 
         jobs[job_id].update({
@@ -103,14 +114,18 @@ def index():
 
 @app.route('/process', methods=['POST'])
 def process_m3u8():
-    m3u8_url = request.get_json().get('url')
+    data = request.get_json()
+    m3u8_url = data.get('url')
+    audio_delay_cs = data.get('audio_delay', 0) # Riceve il valore del ritardo
+
     if not m3u8_url:
         return jsonify({'error': 'URL M3U8 non fornito'}), 400
 
     job_id = str(uuid.uuid4())
     jobs[job_id] = {'status': 'starting', 'created_at': time.time()}
     
-    thread = threading.Thread(target=run_conversion_task, args=(job_id, m3u8_url))
+    # Passa il ritardo al thread di conversione
+    thread = threading.Thread(target=run_conversion_task, args=(job_id, m3u8_url, audio_delay_cs))
     thread.start()
     
     return jsonify({'job_id': job_id})
