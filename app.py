@@ -34,25 +34,24 @@ def process_m3u8():
     if not m3u8_url:
         return jsonify({'error': 'URL M3U8 non fornito'}), 400
 
-    try:
-        # Genera nomi di file unici per questa richiesta
-        unique_id = str(uuid.uuid4())
-        ts_filename = f"{unique_id}.ts"
-        mp4_filename = f"{unique_id}.mp4"
-        ts_filepath = os.path.join(DOWNLOAD_FOLDER, ts_filename)
-        mp4_filepath = os.path.join(CONVERTED_FOLDER, mp4_filename)
+    # Definiamo i percorsi dei file all'inizio del blocco try
+    unique_id = str(uuid.uuid4())
+    ts_filename = f"{unique_id}.ts"
+    mp4_filename = f"{unique_id}.mp4"
+    ts_filepath = os.path.join(DOWNLOAD_FOLDER, ts_filename)
+    mp4_filepath = os.path.join(CONVERTED_FOLDER, mp4_filename)
 
+    try:
         # 1. Carica e analizza il file M3U8
         playlist = m3u8.load(m3u8_url)
         
         # 2. Scarica e unisce tutti i segmenti in un unico file .ts
         with open(ts_filepath, 'wb') as f_out:
             for segment in playlist.segments:
-                segment_url = segment.uri
-                # Gestisce URL relativi
-                if not segment_url.startswith(('http://', 'https://')):
-                    base_url = m3u8.parser.urljoin(m3u8_url, '.')
-                    segment_url = os.path.join(base_url, segment_url)
+                # --- CORREZIONE APPLICATA QUI ---
+                # La libreria gestisce automaticamente gli URL relativi.
+                # Usiamo 'segment.absolute_uri' per avere l'URL completo e corretto.
+                segment_url = segment.absolute_uri
                 
                 response = requests.get(segment_url, stream=True)
                 response.raise_for_status() # Lancia un errore se la richiesta fallisce
@@ -69,16 +68,21 @@ def process_m3u8():
             '-y',
             mp4_filepath
         ]
-        subprocess.run(command, check=True, capture_output=True, text=True)
+        # Eseguiamo il comando e catturiamo l'output per un eventuale debug
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
 
         # 4. Restituisce l'URL per scaricare il file convertito
         return jsonify({'download_url': f'/download/{mp4_filename}'})
 
+    except subprocess.CalledProcessError as e:
+        # Se ffmpeg fallisce, logghiamo l'errore per il debug
+        print(f"Errore FFMPEG: {e.stderr}")
+        return jsonify({'error': f"Errore durante la conversione video: {e.stderr}"}), 500
     except Exception as e:
-        print(f"Errore: {e}")
+        print(f"Errore generico: {e}")
         return jsonify({'error': f"Si è verificato un errore: {str(e)}"}), 500
     finally:
-        # Pulisce i file temporanei
+        # Pulisce i file temporanei dopo ogni richiesta
         if os.path.exists(ts_filepath):
             os.remove(ts_filepath)
 
@@ -88,6 +92,3 @@ def download_file(filename):
     """Permette al browser di scaricare il file convertito."""
     return send_from_directory(CONVERTED_FOLDER, filename, as_attachment=True)
 
-# --- Avvio (per Render, si userà Gunicorn) ---
-if __name__ == '__main__':
-    app.run(debug=True, port=5001)
