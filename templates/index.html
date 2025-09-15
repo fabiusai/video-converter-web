@@ -25,7 +25,6 @@
             -moz-appearance: textfield;
         }
     </style>
-<link rel="icon" href="favicon.ico">
 </head>
 <body class="bg-gray-100 flex items-center justify-center min-h-screen">
     <div class="w-full max-w-2xl mx-auto bg-white rounded-2xl shadow-xl p-8 space-y-6">
@@ -54,15 +53,23 @@
         </div>
         <div id="status-container" class="hidden pt-4 space-y-4">
             <div id="message-box" class="hidden p-4 rounded-lg text-sm"></div>
-            <!-- BARRA DI AVANZAMENTO -->
             <div id="progress-container" class="hidden w-full bg-gray-200 rounded-full h-4 transition-opacity">
                 <div id="progress-bar" class="bg-blue-600 h-4 rounded-full text-xs font-medium text-blue-100 text-center p-0.5 leading-none transition-all duration-300" style="width: 0%">0%</div>
             </div>
             <p id="status-text" class="text-center text-sm text-gray-600"></p>
             <div id="download-link-container" class="hidden text-center">
-                <a id="download-link" class="inline-block bg-green-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-green-700 transition-transform transform hover:scale-105">
-                    Download Pronto! Clicca qui.
-                </a>
+                <!-- Contenitore per i pulsanti di azione -->
+                <div class="flex items-center justify-center space-x-4">
+                    <a id="download-link" class="inline-block bg-green-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-green-700 transition-transform transform hover:scale-105">
+                        Download Pronto! Clicca qui.
+                    </a>
+                    <!-- NUOVO PULSANTE COPIA LINK -->
+                    <button id="copy-link-btn" title="Copia link per Download Manager" class="p-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                    </button>
+                </div>
                 <p class="text-xs text-gray-500 mt-2">
                     Nota: Il link per il download è temporaneo e scadrà tra circa 30 minuti.
                 </p>
@@ -79,6 +86,7 @@
         const statusText = document.getElementById('status-text');
         const downloadLinkContainer = document.getElementById('download-link-container');
         const downloadLink = document.getElementById('download-link');
+        const copyLinkBtn = document.getElementById('copy-link-btn'); // NUOVO
         const progressContainer = document.getElementById('progress-container');
         const progressBar = document.getElementById('progress-bar');
         let pollingInterval;
@@ -88,6 +96,7 @@
             urlInput.value = '';
             urlInput.focus();
         });
+        copyLinkBtn.addEventListener('click', copyDownloadLink); // NUOVO
 
         function showMessage(type, text) {
             messageBox.textContent = text;
@@ -114,11 +123,34 @@
             processBtn.innerHTML = `<div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-6 w-6"></div> <span class="ml-2">In Lavorazione...</span>`;
         }
 
+        // NUOVA FUNZIONE PER COPIARE IL LINK
+        function copyDownloadLink() {
+            const fullUrl = downloadLink.href;
+            const textarea = document.createElement('textarea');
+            textarea.value = fullUrl;
+            document.body.appendChild(textarea);
+            textarea.select();
+            try {
+                document.execCommand('copy');
+                const originalContent = copyLinkBtn.innerHTML;
+                copyLinkBtn.innerHTML = `<span class="text-sm font-semibold">Copiato!</span>`;
+                copyLinkBtn.disabled = true;
+                setTimeout(() => {
+                    copyLinkBtn.innerHTML = originalContent;
+                    copyLinkBtn.disabled = false;
+                }, 2000);
+            } catch (err) {
+                console.error('Errore nel copiare il link: ', err);
+                showMessage('error', 'Impossibile copiare il link.');
+            } finally {
+                document.body.removeChild(textarea);
+            }
+        }
+
         async function startProcess() {
             const m3u8Url = urlInput.value.trim();
             const audioDelayValue = delayInput.value.trim();
             const audioDelayCs = parseInt(audioDelayValue, 10) || 0;
-
             if (!m3u8Url) {
                 showMessage('error', 'Per favore, inserisci un URL valido.');
                 statusContainer.classList.remove('hidden');
@@ -128,7 +160,6 @@
             statusContainer.classList.remove('hidden');
             setLoadingState();
             statusText.textContent = 'Avvio del processo sul server...';
-
             try {
                 const response = await fetch('/process', {
                     method: 'POST',
@@ -136,7 +167,6 @@
                     body: JSON.stringify({ url: m3u8Url, audio_delay: audioDelayCs }),
                 });
                 if (!response.ok) throw new Error('Errore nell\'avvio del processo.');
-
                 const result = await response.json();
                 const { job_id } = result;
                 if (job_id) {
@@ -161,15 +191,11 @@
                         return;
                     }
                     if (!response.ok) return;
-
                     const data = await response.json();
-
-                    // Aggiorna la barra di avanzamento se presente
                     if (data.progress !== undefined) {
                         progressBar.style.width = `${data.progress}%`;
                         progressBar.textContent = `${data.progress}%`;
                     }
-
                     switch (data.status) {
                         case 'downloading':
                             progressContainer.classList.remove('hidden');
@@ -203,3 +229,4 @@
     </script>
 </body>
 </html>
+
