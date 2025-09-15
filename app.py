@@ -22,70 +22,71 @@ jobs = {}
 # --- Funzione di Pulizia in Background ---
 def cleanup_old_files():
     """
-    Eseguita in un thread separato per pulire periodicamente i file convertiti
-    più vecchi di 1 ora, per liberare spazio su disco.
+    Eseguita in background per pulire i file e i job più vecchi di 30 minuti.
     """
     while True:
         try:
-            print("[CLEANUP] Esecuzione della pulizia dei vecchi file...")
+            print("[CLEANUP] Esecuzione della pulizia...")
             now = time.time()
-            # Cerca tutti i file .mp4 nella cartella dei file convertiti
-            for filepath in glob.glob(os.path.join(CONVERTED_FOLDER, '*.mp4')):
-                # Se il file è più vecchio di 3600 secondi (1 ora), eliminalo
-                if os.path.getmtime(filepath) < now - 3600:
-                    os.remove(filepath)
-                    print(f"[CLEANUP] File eliminato perché obsoleto: {filepath}")
+            # Durata in secondi (30 minuti)
+            expiration_time = 1800 
+            
+            # Copia le chiavi per evitare problemi di iterazione su un dizionario che cambia
+            job_ids_to_check = list(jobs.keys())
+
+            for job_id in job_ids_to_check:
+                job = jobs.get(job_id)
+                # Controlla se il job ha un timestamp di creazione
+                if job and 'created_at' in job and (now - job['created_at'] > expiration_time):
+                    print(f"[CLEANUP] Il Job {job_id} è scaduto. Pulizia in corso...")
+                    
+                    # Rimuovi il file .mp4 associato
+                    mp4_filename = f"{job_id}.mp4"
+                    mp4_filepath = os.path.join(CONVERTED_FOLDER, mp4_filename)
+                    if os.path.exists(mp4_filepath):
+                        os.remove(mp4_filepath)
+                        print(f"[CLEANUP] File eliminato: {mp4_filepath}")
+                    
+                    # Rimuovi il job dal dizionario
+                    del jobs[job_id]
+                    print(f"[CLEANUP] Job rimosso dalla memoria: {job_id}")
+
         except Exception as e:
             print(f"[CLEANUP] Errore durante la pulizia: {e}")
         
-        # Aspetta 1 ora prima di eseguire di nuovo la pulizia
-        time.sleep(3600)
+        # Aspetta 5 minuti prima di controllare di nuovo
+        time.sleep(300)
 
 def run_conversion_task(job_id, m3u8_url):
-    """
-    Contiene la logica di download e conversione, eseguita in background.
-    """
     ts_filename = f"{job_id}.ts"
     mp4_filename = f"{job_id}.mp4"
     ts_filepath = os.path.join(DOWNLOAD_FOLDER, ts_filename)
     mp4_filepath = os.path.join(CONVERTED_FOLDER, mp4_filename)
 
     try:
+        # ... (resto della funzione di conversione rimane invariato) ...
         jobs[job_id]['status'] = 'downloading'
-        print(f"[{job_id}] Caricamento playlist M3U8...")
         playlist = m3u8.load(m3u8_url)
-        print(f"[{job_id}] Trovati {len(playlist.segments)} segmenti.")
 
         with open(ts_filepath, 'wb') as f_out:
-            for i, segment in enumerate(playlist.segments):
-                segment_url = segment.absolute_uri
-                response = requests.get(segment_url, stream=True)
+            for segment in playlist.segments:
+                response = requests.get(segment.absolute_uri, stream=True)
                 response.raise_for_status()
                 for chunk in response.iter_content(chunk_size=8192):
                     f_out.write(chunk)
-                if (i + 1) % 50 == 0:
-                    print(f"[{job_id}] Scaricato segmento {i+1}/{len(playlist.segments)}")
-
+        
         jobs[job_id]['status'] = 'converting'
-        print(f"[{job_id}] Avvio conversione FFMPEG...")
         command = [
             'ffmpeg', '-i', ts_filepath, '-c', 'copy',
             '-bsf:a', 'aac_adtstoasc', '-y', mp4_filepath
         ]
-        # Aggiunto un timeout al processo ffmpeg per sicurezza
         subprocess.run(command, check=True, capture_output=True, text=True, timeout=600)
 
         jobs[job_id].update({
             'status': 'complete',
             'download_url': f'/download/{mp4_filename}'
         })
-        print(f"[{job_id}] Conversione completata.")
-
-    except subprocess.CalledProcessError as e:
-        print(f"[{job_id}] Errore FFMPEG: {e.stderr}")
-        jobs[job_id].update({'status': 'error', 'message': f"Errore FFMPEG: {e.stderr}"})
     except Exception as e:
-        print(f"[{job_id}] Errore durante il processo: {e}")
         jobs[job_id].update({'status': 'error', 'message': str(e)})
     finally:
         if os.path.exists(ts_filepath):
@@ -102,7 +103,8 @@ def process_m3u8():
         return jsonify({'error': 'URL M3U8 non fornito'}), 400
 
     job_id = str(uuid.uuid4())
-    jobs[job_id] = {'status': 'starting'}
+    # Aggiungi il timestamp di creazione al job
+    jobs[job_id] = {'status': 'starting', 'created_at': time.time()}
     
     thread = threading.Thread(target=run_conversion_task, args=(job_id, m3u8_url))
     thread.start()
@@ -113,17 +115,20 @@ def process_m3u8():
 def job_status(job_id):
     job = jobs.get(job_id)
     if not job:
-        return jsonify({'error': 'Job non trovato'}), 404
+        return jsonify({'error': 'Job non trovato o scaduto.'}), 404
     return jsonify(job)
 
 @app.route('/download/<filename>')
 def download_file(filename):
+    filepath = os.path.join(CONVERTED_FOLDER, filename)
+    if not os.path.exists(filepath):
+        # Se il file non esiste, restituisci un errore invece di un 404 generico
+        return "<h1>Errore: File non trovato.</h1><p>Il link per il download potrebbe essere scaduto (dura circa 30 minuti) o il server potrebbe essere stato riavviato. Per favore, prova a riconvertire il video.</p>", 404
     return send_from_directory(CONVERTED_FOLDER, filename, as_attachment=True)
 
 # --- Avvio del Thread di Pulizia ---
-# Questo codice viene eseguito solo quando l'app parte su Render (non in locale)
 if __name__ != '__main__':
     cleanup_thread = threading.Thread(target=cleanup_old_files, daemon=True)
     cleanup_thread.start()
-    print("Thread di pulizia per i file vecchi avviato.")
+    print("Thread di pulizia per i file e i job vecchi avviato.")
 
