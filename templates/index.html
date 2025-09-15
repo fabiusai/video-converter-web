@@ -16,7 +16,6 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
-        /* Rimuove le frecce dall'input numerico */
         input[type=number]::-webkit-inner-spin-button, 
         input[type=number]::-webkit-outer-spin-button { 
             -webkit-appearance: none; 
@@ -34,7 +33,6 @@
             <p class="text-gray-500 mt-2">Incolla un URL .m3u8 per scaricare il video come file MP4.</p>
         </div>
         <div class="space-y-4">
-            <!-- CAMPO URL CON PULSANTE PULISCI -->
             <div class="relative">
                 <input type="url" id="m3u8-url" placeholder="https://example.com/path/to/playlist.m3u8" class="w-full px-4 py-3 pr-10 text-gray-700 bg-gray-50 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
                 <button id="clear-btn" class="absolute inset-y-0 right-0 flex items-center pr-3 cursor-pointer text-gray-400 hover:text-gray-600">
@@ -43,8 +41,6 @@
                     </svg>
                 </button>
             </div>
-            
-            <!-- CAMPO RITARDO AUDIO -->
             <div>
                 <label for="audio-delay" class="block text-sm font-medium text-gray-700 mb-1">Correzione Sincronizzazione Audio (opzionale)</label>
                 <input type="number" id="audio-delay" name="audio-delay" placeholder="0" class="w-full px-4 py-3 text-gray-700 bg-gray-50 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all">
@@ -57,6 +53,10 @@
         </div>
         <div id="status-container" class="hidden pt-4 space-y-4">
             <div id="message-box" class="hidden p-4 rounded-lg text-sm"></div>
+            <!-- BARRA DI AVANZAMENTO -->
+            <div id="progress-container" class="hidden w-full bg-gray-200 rounded-full h-4 transition-opacity">
+                <div id="progress-bar" class="bg-blue-600 h-4 rounded-full text-xs font-medium text-blue-100 text-center p-0.5 leading-none transition-all duration-300" style="width: 0%">0%</div>
+            </div>
             <p id="status-text" class="text-center text-sm text-gray-600"></p>
             <div id="download-link-container" class="hidden text-center">
                 <a id="download-link" class="inline-block bg-green-600 text-white font-bold py-3 px-6 rounded-lg hover:bg-green-700 transition-transform transform hover:scale-105">
@@ -78,6 +78,8 @@
         const statusText = document.getElementById('status-text');
         const downloadLinkContainer = document.getElementById('download-link-container');
         const downloadLink = document.getElementById('download-link');
+        const progressContainer = document.getElementById('progress-container');
+        const progressBar = document.getElementById('progress-bar');
         let pollingInterval;
 
         processBtn.addEventListener('click', startProcess);
@@ -98,6 +100,9 @@
             statusContainer.classList.add('hidden');
             messageBox.classList.add('hidden');
             downloadLinkContainer.classList.add('hidden');
+            progressContainer.classList.add('hidden');
+            progressBar.style.width = '0%';
+            progressBar.textContent = '0%';
             statusText.textContent = '';
             processBtn.disabled = false;
             processBtn.innerHTML = `<span>Avvia Processo</span>`;
@@ -160,14 +165,23 @@
 
                     switch (data.status) {
                         case 'downloading':
+                            progressContainer.classList.remove('hidden');
                             statusText.textContent = 'Il server sta scaricando i segmenti video...';
+                            if (data.progress !== undefined) {
+                                progressBar.style.width = `${data.progress}%`;
+                                progressBar.textContent = `${data.progress}%`;
+                            }
                             break;
                         case 'converting':
+                            progressContainer.classList.remove('hidden');
+                            progressBar.style.width = '100%';
+                            progressBar.textContent = '100%';
                             statusText.textContent = 'Download completato. Inizio conversione in MP4...';
                             break;
                         case 'complete':
                             clearInterval(pollingInterval);
                             statusText.textContent = 'Conversione completata con successo!';
+                            progressContainer.classList.add('hidden');
                             downloadLink.href = data.download_url;
                             downloadLinkContainer.classList.remove('hidden');
                             processBtn.disabled = false;
@@ -175,6 +189,7 @@
                             break;
                         case 'error':
                             clearInterval(pollingInterval);
+                            progressContainer.classList.add('hidden');
                             showMessage('error', `Errore del server: ${data.message}`);
                             resetUI();
                             break;
