@@ -28,34 +28,28 @@ def cleanup_old_files():
         try:
             print("[CLEANUP] Esecuzione della pulizia...")
             now = time.time()
-            # Durata in secondi (30 minuti)
-            expiration_time = 1800 
+            expiration_time = 1800  # Durata in secondi (30 minuti)
             
-            # Copia le chiavi per evitare problemi di iterazione su un dizionario che cambia
             job_ids_to_check = list(jobs.keys())
 
             for job_id in job_ids_to_check:
                 job = jobs.get(job_id)
-                # Controlla se il job ha un timestamp di creazione
                 if job and 'created_at' in job and (now - job['created_at'] > expiration_time):
                     print(f"[CLEANUP] Il Job {job_id} è scaduto. Pulizia in corso...")
                     
-                    # Rimuovi il file .mp4 associato
                     mp4_filename = f"{job_id}.mp4"
                     mp4_filepath = os.path.join(CONVERTED_FOLDER, mp4_filename)
                     if os.path.exists(mp4_filepath):
                         os.remove(mp4_filepath)
                         print(f"[CLEANUP] File eliminato: {mp4_filepath}")
                     
-                    # Rimuovi il job dal dizionario
                     del jobs[job_id]
                     print(f"[CLEANUP] Job rimosso dalla memoria: {job_id}")
 
         except Exception as e:
             print(f"[CLEANUP] Errore durante la pulizia: {e}")
         
-        # Aspetta 5 minuti prima di controllare di nuovo
-        time.sleep(300)
+        time.sleep(300) # Aspetta 5 minuti
 
 def run_conversion_task(job_id, m3u8_url):
     ts_filename = f"{job_id}.ts"
@@ -64,7 +58,6 @@ def run_conversion_task(job_id, m3u8_url):
     mp4_filepath = os.path.join(CONVERTED_FOLDER, mp4_filename)
 
     try:
-        # ... (resto della funzione di conversione rimane invariato) ...
         jobs[job_id]['status'] = 'downloading'
         playlist = m3u8.load(m3u8_url)
 
@@ -76,9 +69,18 @@ def run_conversion_task(job_id, m3u8_url):
                     f_out.write(chunk)
         
         jobs[job_id]['status'] = 'converting'
+        
+        # --- COMANDO FFMPEG MIGLIORATO ---
+        # Aggiunti -copyts e -start_at_zero per una migliore gestione dei timestamp
+        # e una sincronizzazione audio/video più precisa.
         command = [
-            'ffmpeg', '-i', ts_filepath, '-c', 'copy',
-            '-bsf:a', 'aac_adtstoasc', '-y', mp4_filepath
+            'ffmpeg', 
+            '-i', ts_filepath, 
+            '-c', 'copy',
+            '-copyts',
+            '-start_at_zero',
+            '-bsf:a', 'aac_adtstoasc', 
+            '-y', mp4_filepath
         ]
         subprocess.run(command, check=True, capture_output=True, text=True, timeout=600)
 
@@ -87,7 +89,10 @@ def run_conversion_task(job_id, m3u8_url):
             'download_url': f'/download/{mp4_filename}'
         })
     except Exception as e:
-        jobs[job_id].update({'status': 'error', 'message': str(e)})
+        error_message = str(e)
+        if hasattr(e, 'stderr'):
+            error_message = e.stderr
+        jobs[job_id].update({'status': 'error', 'message': error_message})
     finally:
         if os.path.exists(ts_filepath):
             os.remove(ts_filepath)
@@ -103,7 +108,6 @@ def process_m3u8():
         return jsonify({'error': 'URL M3U8 non fornito'}), 400
 
     job_id = str(uuid.uuid4())
-    # Aggiungi il timestamp di creazione al job
     jobs[job_id] = {'status': 'starting', 'created_at': time.time()}
     
     thread = threading.Thread(target=run_conversion_task, args=(job_id, m3u8_url))
@@ -122,11 +126,9 @@ def job_status(job_id):
 def download_file(filename):
     filepath = os.path.join(CONVERTED_FOLDER, filename)
     if not os.path.exists(filepath):
-        # Se il file non esiste, restituisci un errore invece di un 404 generico
         return "<h1>Errore: File non trovato.</h1><p>Il link per il download potrebbe essere scaduto (dura circa 30 minuti) o il server potrebbe essere stato riavviato. Per favore, prova a riconvertire il video.</p>", 404
     return send_from_directory(CONVERTED_FOLDER, filename, as_attachment=True)
 
-# --- Avvio del Thread di Pulizia ---
 if __name__ != '__main__':
     cleanup_thread = threading.Thread(target=cleanup_old_files, daemon=True)
     cleanup_thread.start()
