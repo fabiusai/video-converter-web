@@ -163,20 +163,20 @@
 
                     const data = await response.json();
 
+                    // Aggiorna la barra di avanzamento se presente
+                    if (data.progress !== undefined) {
+                        progressBar.style.width = `${data.progress}%`;
+                        progressBar.textContent = `${data.progress}%`;
+                    }
+
                     switch (data.status) {
                         case 'downloading':
                             progressContainer.classList.remove('hidden');
                             statusText.textContent = 'Il server sta scaricando i segmenti video...';
-                            if (data.progress !== undefined) {
-                                progressBar.style.width = `${data.progress}%`;
-                                progressBar.textContent = `${data.progress}%`;
-                            }
                             break;
                         case 'converting':
                             progressContainer.classList.remove('hidden');
-                            progressBar.style.width = '100%';
-                            progressBar.textContent = '100%';
-                            statusText.textContent = 'Download completato. Inizio conversione in MP4...';
+                            statusText.textContent = 'Conversione in MP4 in corso...';
                             break;
                         case 'complete':
                             clearInterval(pollingInterval);
