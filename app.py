@@ -59,31 +59,34 @@ def run_conversion_task(job_id, m3u8_url, audio_delay_cs):
 
     try:
         jobs[job_id]['status'] = 'downloading'
+        jobs[job_id]['progress'] = 0  # Inizializza la percentuale
         playlist = m3u8.load(m3u8_url)
+        total_segments = len(playlist.segments)
 
         with open(ts_filepath, 'wb') as f_out:
-            for segment in playlist.segments:
+            for i, segment in enumerate(playlist.segments):
                 response = requests.get(segment.absolute_uri, stream=True)
                 response.raise_for_status()
                 for chunk in response.iter_content(chunk_size=8192):
                     f_out.write(chunk)
+                
+                # Aggiorna la percentuale di avanzamento
+                if total_segments > 0:
+                    progress_percentage = int(((i + 1) / total_segments) * 100)
+                    jobs[job_id]['progress'] = progress_percentage
         
         jobs[job_id]['status'] = 'converting'
+        jobs[job_id]['progress'] = 100
         
-        # --- LOGICA FFMPEG CON CONTROLLO DEL RITARDO AUDIO ---
         command = ['ffmpeg', '-i', ts_filepath]
 
-        # Se è specificato un ritardo, l'audio deve essere ricodificato.
         if audio_delay_cs != 0:
             delay_in_seconds = float(audio_delay_cs) / 100.0
-            print(f"[FFMPEG] Applicazione di un ritardo audio di {delay_in_seconds} secondi.")
-            # Copia il video, ma applica un filtro all'audio
             command.extend([
                 '-c:v', 'copy',
                 '-af', f'asetpts=PTS+({delay_in_seconds})/TB' 
             ])
         else:
-            # Conversione lossless standard
             command.extend([
                 '-c', 'copy',
                 '-copyts',
@@ -116,7 +119,7 @@ def index():
 def process_m3u8():
     data = request.get_json()
     m3u8_url = data.get('url')
-    audio_delay_cs = data.get('audio_delay', 0) # Riceve il valore del ritardo
+    audio_delay_cs = data.get('audio_delay', 0)
 
     if not m3u8_url:
         return jsonify({'error': 'URL M3U8 non fornito'}), 400
@@ -124,7 +127,6 @@ def process_m3u8():
     job_id = str(uuid.uuid4())
     jobs[job_id] = {'status': 'starting', 'created_at': time.time()}
     
-    # Passa il ritardo al thread di conversione
     thread = threading.Thread(target=run_conversion_task, args=(job_id, m3u8_url, audio_delay_cs))
     thread.start()
     
